@@ -1,0 +1,152 @@
+一、基本环境配置：
+1.1.安装ssh
+sudo apt-get install openssh-server
+查看是否启动：
+ps -e|grep ssh
+启动ssh服务：
+sudo /etc/init.d/ssh  start
+
+2.2. 安装编辑器工具配置vi, vim;
+设置vim行号：
+sudo vim /etc/vim/vimrc
+//文本末尾行以下：
+{
+      syntax on   #自动语法高亮
+      set nu
+      #set number 
+      # 显示行号
+      set cursorline  #突出显示当前行
+      set ruler  #打开状态栏标尺
+      set tabstop=4  #设定 tab 长度为 4
+      set incsearch  #输入搜索内容时就显示搜索结果
+      set hlsearch  #搜索时高亮显示被找到的文本
+}
+
+2.3.配置静态ip,配置DNS;
+//设置静态IP:
+vim /etc/network/interfaces //直接copy以下代码：
+{
+      # This file describes the network interfaces available on your system
+      # and how to activate them. For more information, see interfaces(5).
+        
+      source /etc/network/interfaces.d/*
+      
+      # The loopback network interface
+      auto lo
+      iface lo inet loopback
+      
+      # The primary network interface
+      auto ens33
+      #iface ens33 inet dhcp
+      iface ens33 inet static
+      #have set ip: server-109, redis-104,srs-108
+      address 192.168.1.XX
+      natmask 255.255.255.0
+      gateway 192.168.1.1
+      
+      # This is an autoconfigured IPv6 interface
+      iface ens33 inet6 auto
+}
+//注意：192.168.1.XX  是你要设置的静态IP
+
+
+sudo vim /etc/resolv.conf   #配置DNS server
+{
+    nameserver 8.8.8.8   #8.8.8.8是DNS服务，可以是任意有效的
+}
+//重启网络：
+sudo /etc/init.d/networking restart；
+
+如果没有重启网络则：sudo ifdown eth0 && sudo ifup eth0
+重启机器.OK
+2.4. 更换ali源；
+cd /etc/apt/
+//备份原来的源文件
+cp sources.list sources_copy01.list
+
+{
+       # deb cdrom:[Ubuntu 16.04 LTS _Xenial Xerus_ - Release amd64 (20160420.1)]/ xenial main restricted
+       deb-src http://archive.ubuntu.com/ubuntu xenial main restricted
+       #Added by software-properties
+       deb http://mirrors.aliyun.com/ubuntu/ xenial main restricted
+       deb-src http://mirrors.aliyun.com/ubuntu/ xenial main restricted multiverse universe
+       #Added by software-properties
+       deb http://mirrors.aliyun.com/ubuntu/ xenial-updates main restricted
+       deb-src http://mirrors.aliyun.com/ubuntu/ xenial-updates main restricted multiverse universe
+       #Added by software-properties
+       deb http://mirrors.aliyun.com/ubuntu/ xenial universe
+       deb http://mirrors.aliyun.com/ubuntu/ xenial-updates universe
+       deb http://mirrors.aliyun.com/ubuntu/ xenial multiverse
+       deb http://mirrors.aliyun.com/ubuntu/ xenial-updates multiverse
+       deb http://mirrors.aliyun.com/ubuntu/ xenial-backports main restricted universe multiverse
+       deb-src http://mirrors.aliyun.com/ubuntu/ xenial-backports main restricted universe multiverse 
+       #Added by software-properties
+       deb http://archive.canonical.com/ubuntu xenial partner
+       deb-src http://archive.canonical.com/ubuntu xenial partner
+       deb http://mirrors.aliyun.com/ubuntu/ xenial-security main restricted
+       deb-src http://mirrors.aliyun.com/ubuntu/ xenial-security main restricted multiverse universe 
+       #Added by software-properties
+       deb http://mirrors.aliyun.com/ubuntu/ xenial-security universe
+       deb http://mirrors.aliyun.com/ubuntu/ xenial-security multiverse
+}
+更换掉以前的源文件；
+sudo apt-get update
+
+//报错：
+{
+       Err:1 http://mirrors.aliyun.com/ubuntu xenial InRelease
+         Temporary failure resolving 'mirrors.aliyun.com'
+       Err:2 http://archive.canonical.com/ubuntu xenial InRelease
+         Temporary failure resolving 'archive.canonical.com'
+       Err:3 http://archive.ubuntu.com/ubuntu xenial InRelease
+         Temporary failure resolving 'archive.ubuntu.com'
+       Err:4 http://mirrors.aliyun.com/ubuntu xenial-updates InRelease
+         Temporary failure resolving 'mirrors.aliyun.com'
+       Err:5 http://mirrors.aliyun.com/ubuntu xenial-backports InRelease
+         Temporary failure resolving 'mirrors.aliyun.com'
+       Err:6 http://mirrors.aliyun.com/ubuntu xenial-security InRelease
+         Temporary failure resolving 'mirrors.aliyun.com'
+       Reading package lists... Done
+       W: Failed to fetch http://archive.ubuntu.com/ubuntu/dists/xenial/InRelease  Temporary failure resolving 'archive.ubuntu.com'
+       W: Failed to fetch http://mirrors.aliyun.com/ubuntu/dists/xenial/InRelease  Temporary failure resolving 'mirrors.aliyun.com'
+       W: Failed to fetch http://mirrors.aliyun.com/ubuntu/dists/xenial-updates/InRelease  Temporary failure resolving 'mirrors.aliyun.com'
+       W: Failed to fetch http://mirrors.aliyun.com/ubuntu/dists/xenial-backports/InRelease  Temporary failure resolving 'mirrors.aliyun.com'
+       W: Failed to fetch http://archive.canonical.com/ubuntu/dists/xenial/InRelease  Temporary failure resolving 'archive.canonical.com'
+       W: Failed to fetch http://mirrors.aliyun.com/ubuntu/dists/xenial-security/InRelease  Temporary failure resolving 'mirrors.aliyun.com'
+       W: Some index files failed to download. They have been ignored, or old ones used instead.
+}
+//解决方法：sudo vim /etc/resolv.conf查看配置DNS server
+#配置DNS server
+nameserver 8.8.8.8o  
+
+2.5.安装编译工具：
+sudo apt-get install build-essential
+sudo apt-get install gcc
+sudo apt-get install g++ 
+
+二、其他高级环境安装配置
+1.samba安装步骤：
+{
+      1.sudo apt-get install samba
+      //sudo apt-get install samba samba-common
+      安装完成；
+      2.建立共享文件夹：
+      sudo mkdir /home/will/my_samba01
+      修改权限：sudo chmod 777 /home/will/my_samba01
+      3.修改samba属性   sudo  vim   /etc/samba/smb.conf
+      	//69行 vim 命令模式下 ":69 ",直接跳转到69行，加上以下代码： 
+        {
+            security = user
+        }
+      	//vim 命令模式下 Shift + gg 直接跳转到文件末尾行，在末尾行加上：
+      [myshare]
+                  comment = my share directory
+                  path = /home/pi/my_samba     //该路径就是你在上面建的共享目录的路径
+                  browseable = yes
+                  writable = yes
+                  guest ok = yes
+      4.重启samba服务器：
+      sudo service smbd restart
+      5.可通过文件夹search: IP
+      ifconfg->ip
+}
