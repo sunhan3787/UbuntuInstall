@@ -1,0 +1,180 @@
+1.install, 
+tar xzvf redis-stable.tar.gz
+cd redis-stable
+make
+2.修改配置文件
+sudo vim ./redis.conf
+daemonize no->yes
+#128line ,这样可以默认启动就后台运行Redis server
+
+3.启动Redis server
+cd src/
+./redis-server ../redis.conf
+netstat -app | grep 6379  #查看redis是否正常运行
+
+Redis Option:
+1.KEY：
+keys *     #打印所有的键值对
+set 'key' 'value'
+get 'key'   -> 'value'
+del 'key' 
+#删除一个key
+EXPIRE 'key'   num_second  #超时Redis会删除这个key
+PPTL 'key'   #查看这个key还有多长时间
+
+2.String字符串的操作
+getrange 'key'  start_index  end_index  
+#获取实值字符串中的一部分，从开始下表开始到结束下标；
+
+setbit paper:1001 2005 1
+#bitmap算法，表示已经读过了（表示一篇文章有没有被读过）
+getbit paper:1001 2005
+
+setbit ,getbit适用于很多的用户和很多的数据时用
+#
+#redis本身不做内存和磁盘同步
+#需解决redis存储持久化的问题
+set count 1
+get count   ->1
+incr count #原子操作->count++
+decr count  # ->count--;一直再减，需要做非0判断
+
+3.Hash 散列表
+userid phone_num address  birthday age  degret 
+hset  userid_1  will  18846445378 xian   19951114 25 
+hgetall  userid_1
+hlen userid_1  #获取Hash表中字段的数量？？ 怎么计算字段的数量？
+
+4.List
+lpush server redis
+lrange server 0 10  #10可以超过，返回范围内所有的List Node  顺序的打印
+
+5.Set 集合
+sadd server redis  #redis 加入到server集合，无序的
+
+
+6.Sort Set 有序集合
+
+
+**********************************
+1.订阅者和发布者：
+当做一个消息队列在用；
+协议的格式：string, number,双方商定好的
+定义订阅者端：subscribe redisChat#默认堵塞等待数据
+publish redischat "Hello, glad to see you"#向管道中写入数据
+redischat :多个同时订阅一个通道，只要名字一致就可以了；
+
+2.事务：在关系型数据库，事务的支持性还是很强的
+事务从开始到执行：1）开始事务->2）命令入队->3)执行事务
+multi
+set  vla1 1000
+set c1    2000
+decr c1
+incr vla1
+exec   #查看 val1 和c1 的值
+事务内指令是一起执行的（原子操作），不可分割；
+watch 'key';监控这个key或者多个key是否被更改，如果被更改事务将会被打断
+3.分布式锁的实现：
+4.数据的备份和保存
+save #分布式同步保存数据 ，生成一个文件dump.rdb；和server同目录下，server在启动时会先读取保存的数据
+
+netstat -anop |grep  6379
+
+5.redis安全
+config get requirepass #获取密码
+config set requirepass  "will123"#设置密码
+auth "password"  #授权
+
+6.redis 性能测试
+ ./redis-benchmark -n 10000 -q
+#redis 同时执行10000个请求的性能
+ ./redis-benchmark -t set,get 10000 -q
+
+redis所有命令写入代码-->开源框架：hiredis-0.14.0
+1.安装：
+ cd hiredis-0.14.0/
+make
+sudo make install
+
+ls /usr/local/lib/libhiredis.a
+
+//code-redisconnect
+#include<stdio.h>
+#include<string.h>
+#include<stdlib.h>
+#include<hiredis/hiredis.h>
+
+#define  LOG  printf
+
+int main()
+{
+	redisContext *context = redisConnect("127.0.0.1", 6379);
+	 if (context == NULL || context->err) {
+		 if (context) {
+			 printf("%s\n", context->errstr);
+             LOG("%s\n", context->errstr);
+		} else {
+			printf("redisConnect error\n");
+            LOG("redisConnect error\n");
+		}
+		exit(-1);	
+	}
+    printf("Connect successful...\n");
+	LOG("LOG: Connect successful...\n");
+
+    //auth password->login redis
+    redisReply *reply = redisCommand(context, "auth will123");
+    printf("type : %d\n", reply->type);
+    if (reply->type == REDIS_REPLY_STATUS) {
+    /*SET str Hello World*/
+        printf("auth ok\n");
+    }
+    freeReplyObject(reply);
+    
+    //Set key value
+    char *key = "str";
+    char *val = "value1";
+    /*SET key value */
+    reply = redisCommand(context, "SET %s %s", key, val);
+    printf("type : %d\n", reply->type);
+    if (reply->type == REDIS_REPLY_STATUS) {
+        /*SET str Hello World*/
+        printf("SET %s %s\n", key, val);
+    }
+    freeReplyObject(reply);
+
+    // GET Key val
+    reply = redisCommand(context, "GET %s", key);
+     if (reply->type == REDIS_REPLY_STRING) {
+        /*GET str value1*/
+        printf("GET str %s\n", reply->str);
+        /*GET len 6*/
+        printf("GET len %ld\n", reply->len);
+    }
+    freeReplyObject(reply);
+
+    // APPEND key value
+    char *append = " I am your GOD";
+     reply = redisCommand(context, "APPEND %s %s", key, append);
+    if (reply->type == REDIS_REPLY_INTEGER) {
+         printf("APPEND %s %s \n", key, append);
+    }
+    freeReplyObject(reply);
+    /*GET key*/
+    reply = redisCommand(context, "GET %s", key);
+    if (reply->type == REDIS_REPLY_STRING) {
+        //GET Hello World I am your GOD
+        printf("GET %s\n", reply->str);
+    }
+    freeReplyObject(reply);
+
+    //avoid other error connection
+	redisFree(context);
+    return 0;
+}
+/*编译
+1:gcc file.c -o app ； ./app执行
+2:gcc -o app file.c 
+3:c++编译命令：g++ -o app file.cpp -std=c++11
+*/
+gcc -o redisconnect redisconnect.c -lhiredis
