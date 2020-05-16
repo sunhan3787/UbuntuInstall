@@ -1,0 +1,136 @@
+安装：
+tar zxvf nginx-1.13.7
+tar zxvf zlib-1.2.11
+tar zxvf openssl1-1.1.0g
+tar zxvf pcre-8.41
+//解压
+zlib-1.2.11 //用来压缩
+openssl1-1.1.0g//用来加密
+pcre-8.41//正则表达式
+/*配置:执行下面的一行命令
+--with-pcre=/home/will/Nginx_root/pcre-8.41 
+--with-zlib=/home/will/Nginx_root/zlib-1.2.11 
+--with-openssl=/home/will/Nginx_root/openssl-1.1.0g
+这三个文件的配置注意其源码路径
+*/
+./configure --prefix=/usr/local/nginx/ --with-http_realip_module --with-http_addition_module --with-http_gzip_static_module --with-http_secure_link_module --with-http_stub_status_module --with-stream --with-pcre=/home/will/Nginx_root/pcre-8.41 --with-zlib=/home/will/Nginx_root/zlib-1.2.11 --with-openssl=/home/will/Nginx_root/openssl-1.1.0g
+//编译
+make 
+//安装
+sudo make install
+cd /usr/local/nginx/
+//查看4个文件夹conf  html  logs  sbin
+//授权root权限
+ sudo su
+//启动nginx
+./sbin/nginx -c ./conf/nginx.conf
+//查看状态
+netstat -anop | grep 80
+/*返回：
+tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN      51962/nginx.conf off (0.00/0/0)
+unix  3      [ ]         STREAM     CONNECTED     10780    676/cron
+*/
+//表示启动成功
+
+//打开浏览器访问IP:192.168.1.114
+/*返回：
+Welcome to nginx!
+
+If you see this page, the nginx web server is successfully installed and working. Further configuration is required.
+
+For online documentation and support please refer to nginx.org.
+Commercial support is available at nginx.com.
+
+Thank you for using nginx.
+*/
+//安装成功
+
+cd /usr/local/nginx/conf
+创建并编辑配置文件：demo.conf
+
+//nginx功能：
+1.nginx是获取各种资源的接口
+通过访问公网IP,可以访问到其他子网IP的资源
+
+服务器测试：https://www.sojson.com/http/test.html
+2.起到代理的作用：
+192.168.1.80通过配置demo.conf
+proxy_pass http://192.168.1.134.128;
+使得可以通过访问192.168.1.80来访问192.168.1.134.128的资源
+
+(1)访问本机资源，图片 
+(2)代理其他Nginx资源与图片
+
+PS:做代理服务器和负载均衡服务器是需要打开80端口服务：
+//curl http://127.0.0.1
+//curl -i http://127.0.0.1
+ curl -i http://127.0.0.1:8080      //
+如果需要安装curl,按照提示进行安装
+
+安装完之后：
+ 运行命令：curl -i http://127.0.0.1:8080 会打印出以下log：
+HTTP/1.1 200 OK
+Server: nginx/1.13.7
+Date: Wed, 08 Apr 2020 12:12:55 GMT
+Content-Type: text/html
+Content-Length: 628
+Last-Modified: Thu, 02 Apr 2020 17:34:01 GMT
+Connection: keep-alive
+ETag: "5e862209-274"
+Accept-Ranges: bytes
+
+<!DOCTYPE html>
+<html>
+<head>
+<title>host_address:192.168.1.80</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>host_address:192.168.1.80</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+
+<p>For online documentation and support please refer to
+<a href="http://nginx.org/">nginx.org</a>.<br/>
+Commercial support is available at
+<a href="http://nginx.com/">nginx.com</a>.</p>
+
+<p><em>Thank you for using nginx.</em></p>
+</body>
+</html>
+
+
+踩过的坑：
+
+Q1:端口被占用，不能开启第二个Nginx
+nginx: [emerg] bind() to 0.0.0.0:80 failed (98: Address already in use)
+//1
+fuser -k 80/tcp//杀死进程
+
+//2
+ps -A | grep nginx 
+kill -9 pid1
+kill -9 pid2  
+端口冲突->配置其他端口
+Q2:执行配置文件，IP访问：502，Bad Gatway
+answear: 路径不对
+
+192.168.1.3 - - [02/Apr/2020:11:17:16 -0700] "GET /favicon.ico HTTP/1.1" 502 575 "http://192.168.1.114:8888/" "Mozilla/5.0     
+(Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.149 Safari/537.36"
+ 192.168.1.3 - - [02/Apr/2020:11:17:19 -0700] "GET / HTTP/1.1" 502 575 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleW    
+ ebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.149 Safari/537.36"
+
+
+
+
+
+
+
+
+
