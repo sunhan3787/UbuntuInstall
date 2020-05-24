@@ -1,0 +1,744 @@
+ 该项目将为分为三个阶段：
+    1. 基础版本：基于开源的teamtalk进行修改，修复部分bug（比如内存泄露、Android客户端查看历史消息异常）和改进其部署方式，修改后的版本更方便在已带业务的服务器上进行部署。
+    2. 改进版本：在基础版本上添加部分功能和替换部分组件，目的是完善项目的功能和提高系统高可用性；增加音视频通话功能。
+    3. 高级版本：采用ETCD服务发现机制，可以动态水平增加聊天服务器、负载均衡登录服务器；采用docker的方式便于分布式部署以及单机模拟分布式测试；采用Mycat便于对数据库分库分表和搭建分布式数据库集群；采用MQ(kafka或zeromq)增加消息的吞吐量。
+
+ 2. 目录说明
+```
+|-- android  Android客户端（Android studio 3.2）
+|-- auto_setup  启动目录
+|-- doc    说明文档
+|-- ios IOS客户端
+|-- LICENSE
+|-- mac 苹果客户端
+|-- pb protocol buffer包格式
+|-- php Web后台管理
+|-- server 服务器代码（centos7.0）
+|-- win-client Windows客户端（vs2015编译）
+```
+
+ 3. 编译部署说明（Ubuntu 16.04环境）
+分为一下几个步骤
+1. 安装mysql、nginx、redis、php等常用组件
+2. 编译im
+3. 部署im服务器+web管理后台
+安装方法如下所示
+
+3.1 安装常用组件
+3.1.1 安装mysql
+1. **安装命令**
+- 安装mysql服务器端
+	>sudo apt-get -y install mysql-server
+- 安装mysql客户端
+	>sudo apt-get -y install mysql-client
+- 安装mysql模块
+	>sudo apt-get -y install libmysqlclient-dev
+
+2. **验证是否成功**
+	>sudo netstat -tap | grep mysql
+
+	或者用lsof查看数据库默认端口3306
+	>sudo lsof -i:3306 
+
+3. **进入mysql**
+	>mysql -u root -p
+4. **启动/停止/重启mysql**
+	>service mysql start //启动mysql
+service mysql restart //重新启动mysql
+service mysql stop //关闭mysql
+
+3.1.2 安装redis和 hiredis（如果已经有就不用再安装）
+1. **命令安装**
+
+	(1) 安装Redis,使用命令安装的只是2.83版本的，直接跳到**2.源码安装**
+	>sudo apt-get -y install redis-server
+
+	(2) 启动Redis
+ 	>sudo redis-server
+
+	(3) 查看 redis 是否还在运行
+	 >ps -ef | grep redis       --> 查看进程
+	> netstat -an|grep 6379     --> redis的端口号是6379
+	>redis-cli                --> 查看redis
+
+	(4) 查看Redis 的版本
+	>redis-server --version 或 redis-server -v 
+	>
+	(5) 卸载用命令安装的Redis
+	>sudo apt-get remove redis-server
+	>sudo apt list --installed | grep redis 看看还有没有余留
+	>sudo apt-get remove redis-tools 余留了redis-cli等工具，一并卸载
+	
+2. **源码安装**
+	(1) 下载到合适的位置，自己指定
+	>wget http://download.redis.io/releases/redis-5.0.3.tar.gz  
+
+	(2) 解压
+	>tar -zxvf redis-5.0.3.tar.gz  
+	
+	(3) 编译
+	>cd redis-5.0.3
+	make
+	
+	(4) 编译安装依赖文件
+	>cd deps
+	make hiredis  linenoise lua jemalloc
+	
+	cd hiredis
+	
+	sudo make install
+	
+	cd ../lua
+	
+	sudo make install
+	
+	(5) 安装redis
+	>cd ../../src
+	sudo make install
+
+	(6) 启动Redis
+ 	>sudo redis-server
+    
+	**ubuntu 18.04**使用
+ 	>sudo redis-server --daemonize yes
+
+      然后用sudo lsof -i:6379 查看是否有监听相应的6379 端口
+3.1.3 安装nginx
+1. **安装nginx**
+	(1)安装必要的第三方依赖包
+	>sudo apt-get -y install libpcre3 libpcre3-dev
+	sudo apt-get -y install zlib1g-dev
+	sudo apt-get install openssl libssl-dev
+
+	(2) 下载比较新的稳定版本，自己放到合适的位置
+	> wget http://nginx.org/download/nginx-1.14.2.tar.gz
+	
+	(3) 解压配置编译安装
+	> tar -zxvf nginx-1.14.2.tar.gz
+	cd nginx-1.14.2
+	./configure --prefix=/usr/local/nginx 
+	make
+	sudo make install
+	
+	安装后的执行文件路径：/usr/local/nginx/sbin/
+	配置文件路径：/usr/local/nginx/conf/
+	
+	(4) 创建配置文件子目录和在nginx.conf中包含conf.d
+	>sudo mkdir /usr/local/nginx/conf/conf.d
+	
+	修改/usr/local/nginx/conf/nginx.conf
+	>sudo vim /usr/local/nginx/conf/nginx.conf
+	
+	末尾{之前添加
+	>include /usr/local/nginx/conf/conf.d/*.conf;
+	
+
+
+2. **启动nginx**
+	(1) 创建一个nginx.service
+	   在 /lib/systemd/system/目录下面新建一个nginx.service文件。并赋予可执行的权限。
+	>sudo vim /lib/systemd/system/nginx.service
+	>sudo chmod +x /lib/systemd/system/nginx.service
+
+	(2) 编辑service内容
+	```
+	[Unit]
+	Description=nginx - high performance web server
+	After=network.target remote-fs.target nss-lookup.target
+	[Service]
+	Type=forking
+	ExecStart=/usr/local/nginx/sbin/nginx -c /usr/local/nginx/conf/nginx.conf
+	ExecReload=/usr/local/nginx/sbin/nginx -s reload
+	ExecStop=/usr/local/nginx/sbin/nginx -s stop
+	[Install]
+	WantedBy=multi-user.target
+	```
+	(3) 启动服务
+     在启动服务之前，需要先重载systemctl命令
+	>sudo systemctl daemon-reload
+        >sudo systemctl start nginx.service 启动nginx	
+
+    然后使用sudo ps -ef | grep nginx 查看是否有相应的进程![](https://upload-images.jianshu.io/upload_images/12119754-502240f2ce7fac7e.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+   常用命令
+	>启动：sudo systemctl start nginx.service 
+	>停止：sudo systemctl stop nginx.service 
+	>重新加载：sudo systemctl reload nginx.service 	
+	显示nginx服务的状态：systemctl status nginx.service
+	在开机时启用nginx服务：sudo systemctl enable nginx.service
+	在开机时禁用nginx服务：sudo systemctl disable nginx.service
+
+3.1.4 安装php（ubuntu16.04版本）
+（**如果是你是ubuntu18+版本直接看3.1.5**）
+1. **命令安装**
+  (1) 安装PHP7以及常用扩展
+	>sudo apt-get -y install php7.0-fpm php7.0-mysql php7.0-common php7.0-mbstring php7.0-gd php7.0-json php7.0-cli php7.0-curl 
+	
+   	(2) 启动php7.0-fpm进程
+	>sudo systemctl start php7.0-fpm
+
+	(3）查看php7.0-fpm运行状态。
+	>systemctl status php7.0-fpm 
+	>或
+	>/etc/init.d/php7.0-fpm status
+
+	(4) 测试PHP是否安装成功
+	>php -v
+或
+php --version
+
+2. **修改php配置文件**
+	(1) 修改www.conf
+	>sudo vim /etc/php/7.0/fpm/pool.d/www.conf
+
+	做如下处理（大概49行）
+	注释掉
+	>;listen.owner = www-data
+;listen.group = www-data
+
+	将mode值修改为0666
+	>listen.mode = 0666
+
+(2) 最后，执行sudo /etc/init.d/php7.0-fpm restart重启php-fpm服务
+
+//我安装了php7.0版本
+sudo apt­get ­y install php7.0­fpm php7.0­mysql php7.0­common php7.0­mbstring php7.0­gd php7.0­json php7.0­cli php7.0­curl
+3.2 编译IM
+进入目录0voice_im/server/src
+
+1. 编译protocol buffer库
+> sudo ./make_protobuf.sh 
+
+2. 编译日志log4
+> sudo ./make_log4cxx.sh
+
+3. 编译IM模块
+> sudo ./build_ubuntu.sh version 1.0
+
+4. 编译完成后返回上一级目录，即是回到0voice_im/server目录
+>cd ..
+
+此时多了im-server-1.0.tar.gz压缩包
+
+
+将im-server-1.0.tar.gz拷贝到0voice_im/auto_setup/im_server
+>cp im-server-1.0.tar.gz ../auto_setup/im_server/
+
+3.3 部署IM+web管理后台
+进入auto_setup，准备部署im
+
+1. **导入teamtalk数据库**
+注意数据库的密码和在安装mysql时候一致
+在setup.sh里面修改数据库密码
+	>cd auto_setup/mysql
+	>vim setup.sh
+
+	将数据库密码改为在mysql时配置的密码，我在配置时使用了will123，所以改为
+	>MYSQL_PASSWORD=will123
+
+导入数据库
+  >sudo ./setup.sh install
+
+也可以进入mysql做二次确认
+  >mysql -u root -p
+	>show databases;
+
+2. **启动IM**
+(1) 先配置模块配置文件
+我们先单机部署，主要是修改msgserver.conf、dbproxyserver.conf和loginserver.conf
+	>cd auto_setup/im_server
+
+	修改auto_setup/im_server/conf目录的配置文件
+	>vim conf/msgserver.conf
+	
+	将大概28行的IpAddr1和IpAddr2改为本机IP外网地址，如果是局域网部署则改为局域网ip，比如
+	>IpAddr1=192.168.1.114 #电信IP
+	IpAddr2=192.168.1.114 #网通IP
+	
+	修改访问db的密码
+	>vim conf/dbproxyserver.conf
+	
+	[修改db密码]root, will123
+	修改loginserver.conf
+	>vim conf/loginserver.conf
+	>内容为：msfs=http://192.168.1.114:8700/
+	
+	其余不做修改
+(2) 启动服务器模块	
+	
+	>sudo ./setup.sh install
+
+	(3) 端口说明，可以使用sudo lsof -i:端口号（或者sudo netstat -tunlp查看所有端口） 查看相应进程是否起来
+	- msg_server：消息服务器，用户登录成功后，就和指定的消息服务器交互。端口8000，需对外开放
+	- login_server ：登录服务器，负责身份验证，负责给登录成功的客户端分配msg_server。
+这个服务监听在两个端口，一个是tcp端口8100，用于和后端的服务器交互，另一个是http端口8080，需对外开放
+	- route_server：消息转发，不同msg_server上用户交互需要中转站来转发消息。端口8200
+	- http_msg_server：主要提供对外的web api，端口8400
+	- push_server： 消息群发，端口8500
+	- file_server：文件中转站，临时存储，端口8600
+	- msfs：小文件永久存储，聊天的图片、表情等，端口8700，需对外开放
+	- db_proxy_server：数据库中间件，后端为存储层，mysql和redis， 端口10600
+
+//启动log
+===========================================
+install im server for TeamTalk
+===========================================
+Ubuntu 16.04.3 LTS
+ \l, 64 bit...
+im-server-1.0/
+im-server-1.0/restart.sh
+im-server-1.0/http_msg_server/
+im-server-1.0/http_msg_server/http_msg_server
+im-server-1.0/http_msg_server/httpmsgserver.conf
+im-server-1.0/db_proxy_server/
+im-server-1.0/db_proxy_server/db_proxy_server
+im-server-1.0/db_proxy_server/dbproxyserver.conf
+im-server-1.0/lib/
+im-server-1.0/lib/log4cxx.properties
+im-server-1.0/lib/liblog4cxx.so.10
+im-server-1.0/lib/libslog.so
+im-server-1.0/lib/liblog4cxx.so
+im-server-1.0/lib/liblog4cxx.so.10.0.0
+im-server-1.0/push_server/
+im-server-1.0/push_server/push_server
+im-server-1.0/push_server/pushserver.conf
+im-server-1.0/msfs/
+im-server-1.0/msfs/msfs
+im-server-1.0/msfs/msfs.conf.example
+im-server-1.0/sync_lib_for_zip.sh
+im-server-1.0/daeml
+im-server-1.0/login_server/
+im-server-1.0/login_server/login_server
+im-server-1.0/login_server/loginserver.conf
+im-server-1.0/route_server/
+im-server-1.0/route_server/routeserver.conf
+im-server-1.0/route_server/route_server
+im-server-1.0/msg_server/
+im-server-1.0/msg_server/msg_server
+im-server-1.0/msg_server/msgserver.conf
+im-server-1.0/file_server/
+im-server-1.0/file_server/fileserver.conf
+im-server-1.0/file_server/file_server
+unzip im-server successed.
++ cp -f ./conf/loginserver.conf ./im-server-1.0/login_server/
++ cp -f ./conf/msgserver.conf ./im-server-1.0/msg_server/
++ cp -f ./conf/routeserver.conf ./im-server-1.0/route_server/
++ cp -f ./conf/fileserver.conf ./im-server-1.0/file_server/
++ cp -f ./conf/msfs.conf ./im-server-1.0/msfs/
++ cp -f ./conf/httpmsgserver.conf ./im-server-1.0/http_msg_server/
++ cp -f ./conf/pushserver.conf ./im-server-1.0/push_server/
++ cp -f ./conf/dbproxyserver.conf ./im-server-1.0/db_proxy_server/
++ cd im-server-1.0 im-server-1.0.tar.gz
++ chmod +x ./sync_lib_for_zip.sh
++ ./sync_lib_for_zip.sh
++ cd ..
++ chmod 755 ./im-server-1.0/restart.sh
++ set +x
+Daemon loader
+- Launch specified program as daemon.
+- Loading ./login_server as daemon, please wait ......
+Daemon loader
+- Launch specified program as daemon.
+- Loading ./route_server as daemon, please wait ......
+Daemon loader
+- Launch specified program as daemon.
+- Loading ./msg_server as daemon, please wait ......
+Daemon loader
+- Launch specified program as daemon.
+- Loading ./file_server as daemon, please wait ......
+Daemon loader
+- Launch specified program as daemon.
+- Loading ./msfs as daemon, please wait ......
+Daemon loader
+- Launch specified program as daemon.
+- Loading ./http_msg_server as daemon, please wait ......
+Daemon loader
+- Launch specified program as daemon.
+- Loading ./push_server as daemon, please wait ......
+Daemon loader
+- Launch specified program as daemon.
+- Loading ./db_proxy_server as daemon, please wait ......
+
+
+3. **架设web管理后台**
+
+	(1)  回到0voice_im目录，将php拷贝一份为tt压缩后拷贝到
+0voice_im/auto_setup/im_web/
+	>cd 0voice_im 回到根目录
+		>cp -ar php tt
+		>zip -r tt.zip tt
+		>cp tt.zip auto_setup/im_web/
+		>cd auto_setup/im_web
+
+	(2) 修改web的配置文件，主要是ip地址和数据库用户名和密码以及nginx的配置
+	 **ip地址修改**
+	>vim conf/config.php 
+		
+	 修改为自己的外网地址
+  ```
+		$config['msfs_url'] = 'http://192.168.1.114:8700/';
+		$config['http_url'] = 'http://192.168.1.114:8400';
+  ```
+
+ **数据库修改**
+   > vim conf/database.php
+
+ 修改为：
+```
+	$db['default']['username'] = 'root';
+	$db['default']['password'] = 'will123';
+```
+
+**nginx配置**
+ >vim conf/im.com.conf
+	
+将server_name 192.168.1.114;改为自己的ip地址，以及将php改成你对应的版本号7.0
+
+ (3) 部署web
+ > sudo ./setup.sh install
+//部署weblog
+
+===========================================
+install im web for TeamTalk
+===========================================
+Archive:  tt.zip
+   creating: tt/
+   creating: tt/ui/
+   creating: tt/ui/css/
+  inflating: tt/ui/css/ionicons.min.css
+  inflating: tt/ui/css/jquery.Jcrop.min.css
+  inflating: tt/ui/css/Jcrop.gif
+  inflating: tt/ui/css/main.css
+  inflating: tt/ui/css/simplemodal.css
+  inflating: tt/ui/css/bootstrap.min.css
+  inflating: tt/ui/css/font-awesome.min.css
+  inflating: tt/ui/css/jquery.Jcrop.css
+   creating: tt/ui/js/
+  inflating: tt/ui/js/bootstrap.min.js
+  inflating: tt/ui/js/jquery.min.js
+  inflating: tt/ui/js/juicer.js
+  inflating: tt/ui/js/jquery.Jcrop.js
+  inflating: tt/ui/js/simple-modal.js
+  inflating: tt/ui/js/jquery-1.11.1.min.js
+  inflating: tt/ui/js/jquery.Jcrop.min.js
+  inflating: tt/ui/js/jquery.color.js
+   creating: tt/ui/fonts/
+  inflating: tt/ui/fonts/fontawesome-webfont.eot
+  inflating: tt/ui/fonts/glyphicons-halflings-regular.ttf
+  inflating: tt/ui/fonts/glyphicons-halflings-regular.woff
+  inflating: tt/ui/fonts/fontawesome-webfont.woff
+  inflating: tt/ui/fonts/glyphicons-halflings-regular.svg
+  inflating: tt/ui/fonts/glyphicons-halflings-regular.eot
+  inflating: tt/ui/fonts/fontawesome-webfont.svg
+  inflating: tt/ui/fonts/FontAwesome.otf
+  inflating: tt/ui/fonts/fontawesome-webfont.ttf
+   creating: tt/download/
+  inflating: tt/download/1427521685.jpg
+  inflating: tt/download/1427521757.jpg
+  inflating: tt/download/1427523084.jpg
+  inflating: tt/download/1427520718.jpg
+  inflating: tt/download/1428048305.png
+  inflating: tt/download/1427522826.jpg
+  inflating: tt/download/1428048274.png
+  inflating: tt/download/1428048014.jpg
+  inflating: tt/download/logo.png
+  inflating: tt/download/1428048244.jpg
+  inflating: tt/download/1427523217.jpg
+  inflating: tt/download/1428048381.jpg
+  inflating: tt/download/1427521192.jpg
+  inflating: tt/download/1427520748.jpg
+  inflating: tt/download/1427520832.jpg
+  inflating: tt/download/1428048339.png
+  inflating: tt/download/1427521202.jpg
+ extracting: tt/download/1428048250.png
+  inflating: tt/download/1427521169.jpg
+  inflating: tt/download/1.jpg
+  inflating: tt/download/1427521158.jpg
+  inflating: tt/download/1428048002.png
+  inflating: tt/download/1428049085.png
+  inflating: tt/download/1428048238.jpg
+  inflating: tt/download/1428048406.png
+ extracting: tt/.gitignore
+   creating: tt/system/
+   creating: tt/system/helpers/
+  inflating: tt/system/helpers/html_helper.php
+  inflating: tt/system/helpers/inflector_helper.php
+  inflating: tt/system/helpers/language_helper.php
+  inflating: tt/system/helpers/file_helper.php
+  inflating: tt/system/helpers/directory_helper.php
+  inflating: tt/system/helpers/cookie_helper.php
+  inflating: tt/system/helpers/security_helper.php
+  inflating: tt/system/helpers/array_helper.php
+  inflating: tt/system/helpers/number_helper.php
+  inflating: tt/system/helpers/email_helper.php
+  inflating: tt/system/helpers/captcha_helper.php
+  inflating: tt/system/helpers/smiley_helper.php
+  inflating: tt/system/helpers/typography_helper.php
+  inflating: tt/system/helpers/form_helper.php
+  inflating: tt/system/helpers/date_helper.php
+  inflating: tt/system/helpers/text_helper.php
+  inflating: tt/system/helpers/download_helper.php
+  inflating: tt/system/helpers/string_helper.php
+  inflating: tt/system/helpers/url_helper.php
+  inflating: tt/system/helpers/path_helper.php
+  inflating: tt/system/helpers/xml_helper.php
+  inflating: tt/system/helpers/index.html
+ extracting: tt/system/.htaccess
+   creating: tt/system/libraries/
+  inflating: tt/system/libraries/Table.php
+  inflating: tt/system/libraries/Migration.php
+  inflating: tt/system/libraries/Image_lib.php
+  inflating: tt/system/libraries/Parser.php
+  inflating: tt/system/libraries/User_agent.php
+  inflating: tt/system/libraries/Cart.php
+  inflating: tt/system/libraries/Profiler.php
+  inflating: tt/system/libraries/Trackback.php
+  inflating: tt/system/libraries/Sha1.php
+   creating: tt/system/libraries/Cache/
+   creating: tt/system/libraries/Cache/drivers/
+  inflating: tt/system/libraries/Cache/drivers/Cache_dummy.php
+  inflating: tt/system/libraries/Cache/drivers/Cache_memcached.php
+  inflating: tt/system/libraries/Cache/drivers/Cache_apc.php
+  inflating: tt/system/libraries/Cache/drivers/Cache_file.php
+  inflating: tt/system/libraries/Cache/drivers/index.html
+  inflating: tt/system/libraries/Cache/Cache.php
+  inflating: tt/system/libraries/Cache/index.html
+  inflating: tt/system/libraries/Zip.php
+  inflating: tt/system/libraries/Email.php
+  inflating: tt/system/libraries/Form_validation.php
+  inflating: tt/system/libraries/Upload.php
+  inflating: tt/system/libraries/Xmlrpcs.php
+  inflating: tt/system/libraries/Driver.php
+  inflating: tt/system/libraries/Xmlrpc.php
+  inflating: tt/system/libraries/Log.php
+   creating: tt/system/libraries/javascript/
+  inflating: tt/system/libraries/javascript/Jquery.php
+  inflating: tt/system/libraries/javascript/index.html
+  inflating: tt/system/libraries/Calendar.php
+  inflating: tt/system/libraries/Ftp.php
+  inflating: tt/system/libraries/Pagination.php
+  inflating: tt/system/libraries/Encrypt.php
+  inflating: tt/system/libraries/Unit_test.php
+  inflating: tt/system/libraries/Typography.php
+  inflating: tt/system/libraries/Javascript.php
+  inflating: tt/system/libraries/Session.php
+  inflating: tt/system/libraries/index.html
+   creating: tt/system/fonts/
+  inflating: tt/system/fonts/texb.ttf
+  inflating: tt/system/fonts/index.html
+   creating: tt/system/core/
+  inflating: tt/system/core/Output.php
+  inflating: tt/system/core/Config.php
+  inflating: tt/system/core/Benchmark.php
+  inflating: tt/system/core/URI.php
+  inflating: tt/system/core/Common.php
+  inflating: tt/system/core/Exceptions.php
+  inflating: tt/system/core/Lang.php
+  inflating: tt/system/core/Controller.php
+  inflating: tt/system/core/Input.php
+  inflating: tt/system/core/Router.php
+  inflating: tt/system/core/Loader.php
+  inflating: tt/system/core/Security.php
+  inflating: tt/system/core/Model.php
+  inflating: tt/system/core/CodeIgniter.php
+  inflating: tt/system/core/Utf8.php
+  inflating: tt/system/core/Hooks.php
+  inflating: tt/system/core/index.html
+   creating: tt/system/language/
+   creating: tt/system/language/english/
+  inflating: tt/system/language/english/profiler_lang.php
+  inflating: tt/system/language/english/form_validation_lang.php
+  inflating: tt/system/language/english/number_lang.php
+  inflating: tt/system/language/english/upload_lang.php
+  inflating: tt/system/language/english/db_lang.php
+  inflating: tt/system/language/english/imglib_lang.php
+  inflating: tt/system/language/english/calendar_lang.php
+  inflating: tt/system/language/english/ftp_lang.php
+  inflating: tt/system/language/english/date_lang.php
+  inflating: tt/system/language/english/unit_test_lang.php
+  inflating: tt/system/language/english/migration_lang.php
+  inflating: tt/system/language/english/email_lang.php
+  inflating: tt/system/language/english/index.html
+  inflating: tt/system/language/index.html
+   creating: tt/system/database/
+  inflating: tt/system/database/DB_cache.php
+  inflating: tt/system/database/DB_result.php
+   creating: tt/system/database/drivers/
+   creating: tt/system/database/drivers/odbc/
+  inflating: tt/system/database/drivers/odbc/odbc_driver.php
+  inflating: tt/system/database/drivers/odbc/odbc_utility.php
+  inflating: tt/system/database/drivers/odbc/odbc_forge.php
+  inflating: tt/system/database/drivers/odbc/odbc_result.php
+  inflating: tt/system/database/drivers/odbc/index.html
+   creating: tt/system/database/drivers/cubrid/
+  inflating: tt/system/database/drivers/cubrid/cubrid_result.php
+  inflating: tt/system/database/drivers/cubrid/cubrid_driver.php
+  inflating: tt/system/database/drivers/cubrid/cubrid_forge.php
+  inflating: tt/system/database/drivers/cubrid/cubrid_utility.php
+  inflating: tt/system/database/drivers/cubrid/index.html
+   creating: tt/system/database/drivers/postgre/
+  inflating: tt/system/database/drivers/postgre/postgre_utility.php
+  inflating: tt/system/database/drivers/postgre/postgre_forge.php
+  inflating: tt/system/database/drivers/postgre/postgre_driver.php
+  inflating: tt/system/database/drivers/postgre/postgre_result.php
+  inflating: tt/system/database/drivers/postgre/index.html
+   creating: tt/system/database/drivers/mysqli/
+  inflating: tt/system/database/drivers/mysqli/mysqli_driver.php
+  inflating: tt/system/database/drivers/mysqli/mysqli_utility.php
+  inflating: tt/system/database/drivers/mysqli/mysqli_result.php
+  inflating: tt/system/database/drivers/mysqli/mysqli_forge.php
+  inflating: tt/system/database/drivers/mysqli/index.html
+   creating: tt/system/database/drivers/sqlite/
+  inflating: tt/system/database/drivers/sqlite/sqlite_result.php
+  inflating: tt/system/database/drivers/sqlite/sqlite_driver.php
+  inflating: tt/system/database/drivers/sqlite/sqlite_utility.php
+  inflating: tt/system/database/drivers/sqlite/index.html
+  inflating: tt/system/database/drivers/sqlite/sqlite_forge.php
+   creating: tt/system/database/drivers/oci8/
+  inflating: tt/system/database/drivers/oci8/oci8_utility.php
+  inflating: tt/system/database/drivers/oci8/oci8_driver.php
+  inflating: tt/system/database/drivers/oci8/oci8_result.php
+  inflating: tt/system/database/drivers/oci8/oci8_forge.php
+  inflating: tt/system/database/drivers/oci8/index.html
+   creating: tt/system/database/drivers/pdo/
+  inflating: tt/system/database/drivers/pdo/pdo_forge.php
+  inflating: tt/system/database/drivers/pdo/pdo_result.php
+  inflating: tt/system/database/drivers/pdo/pdo_utility.php
+  inflating: tt/system/database/drivers/pdo/pdo_driver.php
+  inflating: tt/system/database/drivers/pdo/index.html
+   creating: tt/system/database/drivers/mysql/
+  inflating: tt/system/database/drivers/mysql/mysql_forge.php
+  inflating: tt/system/database/drivers/mysql/mysql_utility.php
+  inflating: tt/system/database/drivers/mysql/mysql_result.php
+  inflating: tt/system/database/drivers/mysql/mysql_driver.php
+  inflating: tt/system/database/drivers/mysql/index.html
+   creating: tt/system/database/drivers/mssql/
+  inflating: tt/system/database/drivers/mssql/mssql_utility.php
+  inflating: tt/system/database/drivers/mssql/mssql_driver.php
+  inflating: tt/system/database/drivers/mssql/mssql_forge.php
+  inflating: tt/system/database/drivers/mssql/mssql_result.php
+  inflating: tt/system/database/drivers/mssql/index.html
+   creating: tt/system/database/drivers/sqlsrv/
+  inflating: tt/system/database/drivers/sqlsrv/sqlsrv_driver.php
+  inflating: tt/system/database/drivers/sqlsrv/sqlsrv_utility.php
+  inflating: tt/system/database/drivers/sqlsrv/sqlsrv_forge.php
+  inflating: tt/system/database/drivers/sqlsrv/sqlsrv_result.php
+  inflating: tt/system/database/drivers/sqlsrv/index.html
+  inflating: tt/system/database/drivers/index.html
+  inflating: tt/system/database/DB_active_rec.php
+  inflating: tt/system/database/DB_driver.php
+  inflating: tt/system/database/DB.php
+  inflating: tt/system/database/DB_utility.php
+  inflating: tt/system/database/DB_forge.php
+  inflating: tt/system/database/index.html
+  inflating: tt/system/index.html
+   creating: tt/application/
+   creating: tt/application/helpers/
+  inflating: tt/application/helpers/index.html
+ extracting: tt/application/.htaccess
+   creating: tt/application/config/
+  inflating: tt/application/config/foreign_chars.php
+  inflating: tt/application/config/user_agents.php
+  inflating: tt/application/config/doctypes.php
+  inflating: tt/application/config/smileys.php
+  inflating: tt/application/config/mimes.php
+  inflating: tt/application/config/migration.php
+  inflating: tt/application/config/profiler.php
+  inflating: tt/application/config/database.php
+  inflating: tt/application/config/config.php
+  inflating: tt/application/config/autoload.php
+  inflating: tt/application/config/hooks.php
+  inflating: tt/application/config/routes.php
+  inflating: tt/application/config/constants.php
+  inflating: tt/application/config/index.html
+   creating: tt/application/cache/
+ extracting: tt/application/cache/.htaccess
+  inflating: tt/application/cache/index.html
+   creating: tt/application/errors/
+  inflating: tt/application/errors/error_db.php
+  inflating: tt/application/errors/error_php.php
+  inflating: tt/application/errors/error_general.php
+  inflating: tt/application/errors/error_404.php
+  inflating: tt/application/errors/index.html
+   creating: tt/application/libraries/
+  inflating: tt/application/libraries/image_moo.php
+  inflating: tt/application/libraries/index.html
+   creating: tt/application/logs/
+  inflating: tt/application/logs/index.html
+   creating: tt/application/models/
+  inflating: tt/application/models/admin_model.php
+  inflating: tt/application/models/grouprelation_model.php
+  inflating: tt/application/models/depart_model.php
+  inflating: tt/application/models/discovery_model.php
+  inflating: tt/application/models/group_model.php
+  inflating: tt/application/models/config_model.php
+  inflating: tt/application/models/user_model.php
+  inflating: tt/application/models/index.html
+   creating: tt/application/third_party/
+  inflating: tt/application/third_party/index.html
+   creating: tt/application/core/
+  inflating: tt/application/core/TT_Controller.php
+  inflating: tt/application/core/TT_Model.php
+  inflating: tt/application/core/index.html
+   creating: tt/application/controllers/
+  inflating: tt/application/controllers/discovery.php
+  inflating: tt/application/controllers/group.php
+  inflating: tt/application/controllers/user.php
+  inflating: tt/application/controllers/auth.php
+  inflating: tt/application/controllers/home.php
+  inflating: tt/application/controllers/depart.php
+  inflating: tt/application/controllers/config.php
+  inflating: tt/application/controllers/api.php
+  inflating: tt/application/controllers/index.html
+   creating: tt/application/hooks/
+  inflating: tt/application/hooks/index.html
+   creating: tt/application/language/
+   creating: tt/application/language/english/
+  inflating: tt/application/language/english/index.html
+  inflating: tt/application/language/index.html
+   creating: tt/application/views/
+   creating: tt/application/views/auth/
+  inflating: tt/application/views/auth/login.php
+   creating: tt/application/views/base/
+  inflating: tt/application/views/base/discovery.php
+  inflating: tt/application/views/base/group.php
+  inflating: tt/application/views/base/user.php
+  inflating: tt/application/views/base/footer.php
+  inflating: tt/application/views/base/home.php
+  inflating: tt/application/views/base/depart.php
+  inflating: tt/application/views/base/header.php
+  inflating: tt/application/views/base/system.php
+  inflating: tt/application/views/welcome_message.php
+  inflating: tt/application/views/index.html
+  inflating: tt/application/index.html
+  inflating: tt/index.php
+  inflating: tt/license.txt
+unzip tt successed.
++ mkdir -p /var/www/html
++ cp -r tt/ /var/www/html
++ cp ./conf/database.php /var/www/html/tt/application/config/
++ cp ./conf/config.php /var/www/html/tt/application/config/
++ set +x
++ cp ./conf/im.com.conf /usr/local/nginx/conf/conf.d/
++ chmod -R 777 /var/www/html/tt/
++ set +x
+
+
+ (4) 使用谷歌浏览器（其他浏览器有兼容性问题）打开服务器的ip地址，比如192.168.1.114，然后用户名和密码都为admin
+	
+登录进去后则可以配置部门和成员。
+添加组织架构
+添加用户
+
+
+4. **客户端登录**
+已经编译好的客户端可执行文件路径：0voice_im_0721/win-client/bin/teamtalk/Release/0voice_im.exe，点击可以运行。
+
+
+
+	
+
+
+
+
+
