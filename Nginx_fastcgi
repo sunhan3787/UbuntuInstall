@@ -1,0 +1,141 @@
+一、Nginx的配置：
+cd /usr/local/nginx/conf
+创建并编辑配置文件：demo.conf
+./sbin/nginx -s reload
+
+二、Nginx 配置文件代码：
+1.做Web服务器：
+#demo.conf
+events{
+worker_connections 1024;
+}
+http{
+  server{
+    listen 8080;
+    server_name localhost;
+    
+    location / {
+      root /usr/local/nginx/html/;
+    }
+    location /images/ {
+      root /usr/local/nginx/html/images/;
+    }
+  }
+}
+2.做代理服务器：
+#demo.conf
+events{
+worker_connections 1024;
+}
+http{
+  server{
+    listen 8080;
+    server_name localhost;
+    
+    location / {
+      proxy_pass http://192.168.1.80;
+    }
+  }
+}
+
+3.做负载均衡服务器：
+#demo.conf
+events{
+  worker_connections 1024;
+}
+http{
+  upstream backend {
+    #设定权值
+    server 192.168.1.80 weight=1;
+    server 192.168.1.114 weight=2;
+  }
+  server{
+    listen 8888;
+    server_name localhost;
+    
+    location / {
+      proxy_pass http://backend;
+    }
+  }
+  server{
+    listen 8080;
+    server_name localhost;
+    
+    location / {
+      root /usr/local/nginx/html/;
+    }
+    location /images/ {
+      root /usr/local/nginx/html/images/;
+    }
+  }  
+}
+
+三、fastcgi的实现：
+引入两个库，spawn-fcgl-1.6.4.tar.gz(启动fastcgi程序); fcgi.tar.gz(开发cgi程序的库);
+//fcgi服务器配置
+Cgi：公共网关接口
+应用场景：日志，在线编译工具
+
+完成cd spawn-fcgl-1.6.4文件解压后，
+cd spawn-fcgl-1.6.4
+./configure
+make
+cd src
+cp spawn-fcgi /usr/local/nginx/sbin
+完成fcgi.tar.gz文件解压后，
+cd fcgi-2.4.1-SNAP-0311112127 
+./configure
+//修改源码中的错误：
+sudo su
+ vim include/fcgio.h
+添加 #include <stdio.h>头文件
+make
+make install
+到这里库以安装完毕
+
+Spawn:启动一个进程池；
+Fcgi: cgi的开发库，实现的是cgi协议；
+应用场景：应用于后端中接口比较少不需要对数据库操作的场景下，
+
+eg 实现一个案例：spawn启动一个进程池来管理cgi程序；请求到nginx port_9000端口转发到cgi程序所监听的9002端口，spawn启动一个进程池创建一个进程，解析完数据，返回结果。
+和 fcgi-2.4.1-SNAP-0311112127 同目录下gcc -o sf_cgi sf_cgi.c -lfcgi编译文件，生成可执行文件。 
+cp /usr/local/lib/libfcgi* /usr/lib
+再次运行,可正常执行，
+cd  /usr/local/nginx/sbin/
+./spawn-fcgi -a 127.0.0.1 -p 9002 -f /home/will/nginx_root/sf_cgi
+正常启动9002端口的监听；
+
+下一步配置Nginx,  cd /usr/local/nginx/conf
+ events{
+     worker_connections  1024;
+ }
+
+ http{
+     server {
+         listen 8000;
+         server_name localhost;
+         location / {
+             root /usr/local/nginx/html/web/;
+ #           proxy_pass http://192.168.1.114;
+         }
+         location /images/ {
+             root /usr/local/nginx/html/;
+         }
+     }
+     server{
+         listen 9000;
+         #server_name
+         location ~ \.cgi {
+             fastcgi_pass 127.0.0.1:9002;
+             fastcgi_index index.cgi;
+             fastcgi_param SCRIPT_FILENAME cgi$fastcgi_script_name;
+ #           fastcgi_param QUERY_STRING $query_string;
+             include ../fastcgi_params;
+         }
+     }
+
+ }
+./sbin/nginx  -s reload
+重新加载配置，ok
+//192.168.1.80:9000/fs_cggi.cgi
+访问OK
